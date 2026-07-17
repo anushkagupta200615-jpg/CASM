@@ -1,0 +1,24 @@
+# build artifacts
+softmax_bench
+naive
+shared
+warp
+vectorized
+fused
+*.o
+*.obj
+*.exe
+
+# benchmark outputs (regenerate locally)
+Benchmarks/*
+!Benchmarks/.gitkeep
+
+# python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# editor / os
+.vscode/
+.idea/
+.DS_Store
