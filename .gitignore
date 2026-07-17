@@ -1,5 +1,6 @@
 # build artifacts
 softmax_bench
+softmax_backward_bench
 naive
 shared
 warp

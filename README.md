@@ -34,6 +34,16 @@ Fill this in after running on your GPU (`make run` + the PyTorch script). Illust
 
 **Stage 5 — Fused softmax + matmul** (`Kernel/softmax_fused/`, stretch goal). A mini scaled-dot-product attention head: `O = softmax(Q Kᵀ · scale) V`. One block owns one query row and keeps its scores in shared memory the whole time — the `Tq x Tk` score matrix is never written to global memory. This is the memory-traffic idea FlashAttention scales up; it's the direction the project points toward, not a full FlashAttention clone.
 
+## Backward pass (training)
+
+Forward softmax is inference only. To actually train through a softmax you need its gradient, so `Kernel/softmax_backward/` implements the backward pass. Given the forward output `y = softmax(x)` and the upstream gradient `dy = dL/dy`, the input gradient has a clean closed form:
+
+```
+dx_i = y_i * (dy_i - Σ_j y_j * dy_j)
+```
+
+Every row again reduces to a single reduction — the dot product `Σ_j y_j·dy_j` — followed by an elementwise combine, so the backward pass mirrors the forward optimization story exactly: a **naive** serial version, a **warp-shuffle** register reduction, and a **vectorized** `float4` version. Unlike the forward pass it uses no `exp()` and no max-subtraction (it consumes the already-normalized `y`), so it is numerically tame; correctness is validated both against a CPU reference and, independently, against a finite-difference gradient check. Run it with `make run-bwd`.
+
 ## Build & run
 
 Requires the CUDA toolkit (`nvcc`). Pick your GPU architecture:
@@ -44,11 +54,12 @@ make ARCH=sm_80    # A100
 make ARCH=sm_86    # RTX 30-series (default)
 make ARCH=sm_89    # RTX 40-series
 
-./softmax_bench                 # default 4096 x 4096, 100 iters
+./softmax_bench                 # forward:  default 4096 x 4096, 100 iters
 ./softmax_bench 8192 1024 200   # rows cols iters
+./softmax_backward_bench        # backward (gradient) pass, same table format
 ```
 
-The driver checks every kernel against a CPU reference (`max abs error < 1e-3` → PASS) before timing it, prints the speed table, and runs the fused-attention correctness demo.
+`make` builds both benchmarks; `make run` runs the forward one and `make run-bwd` the backward one. Each driver checks every kernel against a CPU reference (`max abs error < 1e-3` → PASS) before timing it. The forward driver also runs the fused-attention correctness demo.
 
 Add the production baseline row:
 
@@ -75,12 +86,14 @@ CUDA-Softmax/
 │   ├── softmax_sharedmem/      # shared-memory tree reduction
 │   ├── softmax_warpshuffle/    # __shfl_down_sync warp reduction
 │   ├── softmax_vectorized/     # float4 loads/stores
-│   └── softmax_fused/          # fused softmax + matmul (mini attention)
+│   ├── softmax_fused/          # fused softmax + matmul (mini attention)
+│   └── softmax_backward/       # gradient pass: naive / warp / vectorized
 ├── Header/
 │   └── softmax_kernels.cuh     # launcher decls + reduction helpers
 ├── utils/
-│   ├── main.cu                 # correctness + benchmark driver
-│   ├── cpu_reference.cpp/.h    # ground-truth CPU softmax + attention
+│   ├── main.cu                 # forward correctness + benchmark driver
+│   ├── backward_main.cu        # backward correctness + benchmark driver
+│   ├── cpu_reference.cpp/.h    # ground-truth CPU softmax + attention + backward
 ├── bench/
 │   └── benchmark_pytorch.py    # cuDNN production baseline
 ├── standalone/
@@ -90,6 +103,9 @@ CUDA-Softmax/
 └── Makefile
 ```
 
+## Lessons learned
+
+*(Fill this in as you go — reviewers love it.)* The warp-shuffle stage is usually the hardest: the block-level reduction has to combine per-warp partials through a second shuffle, and the `__syncthreads()` placement around the shared scratch buffer is easy to get subtly wrong.
 
 ## Reference reading
 
