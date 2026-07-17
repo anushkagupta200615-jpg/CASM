@@ -90,9 +90,6 @@ CUDA-Softmax/
 └── Makefile
 ```
 
-## Lessons learned
-
-*(Fill this in as you go — reviewers love it.)* The warp-shuffle stage is usually the hardest: the block-level reduction has to combine per-warp partials through a second shuffle, and the `__syncthreads()` placement around the shared scratch buffer is easy to get subtly wrong.
 
 ## Reference reading
 
